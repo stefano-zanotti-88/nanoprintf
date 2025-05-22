@@ -605,6 +605,7 @@ static int npf_ftoa_rev(char *buf, npf_format_spec_t const *spec, double f) {
     buf[dec++] = '.';
   }
 
+  uint_fast8_t odd; odd = 0;
   { // Integer part
     npf_ftoa_man_t man_i;
 
@@ -638,6 +639,14 @@ static int npf_ftoa_rev(char *buf, npf_format_spec_t const *spec, double f) {
       man_i = 0;
     }
     end = dec;
+
+    // This assignment matters only if we emit no fractional digit -- 'odd' can
+    // be overridden below.
+    // We could skip this, and look at the lowest digit (which also works for the
+    // fractional digits), but it would require us to remember where that digit
+    // is, also depending on the presence/absence of the decimal point.
+    // It's easier to determine it here.
+    odd = (man_i & 1);
 
     do { // Print the integer
       if (end >= NANOPRINTF_CONVERSION_BUFFER_SIZE) { goto exit; }
@@ -705,6 +714,20 @@ static int npf_ftoa_rev(char *buf, npf_format_spec_t const *spec, double f) {
     }
     if (exp < NPF_DOUBLE_MAN_BITS) {
       carry &= (uint_fast8_t)(man_f >> (NPF_FTOA_MAN_BITS - 1));
+    }
+    // The "even" in "round-to-even" ("round to nearest, ties to even") refers
+    // to the last significant digit to be printed --considering the value it
+    // has before the rounding-- ie the very first one that will be affected by
+    // the rounding.
+    // If we have fractional digits, "odd" is calculated on the last emitted
+    // digit, thus overriding the integral "odd" stored above
+    if(spec->prec != 0) {
+      odd = ((unsigned)buf[0] - (unsigned)'0') & 0x1; // the difference should be eliminated by the compiler; '0' is guaranteed to be 0x30
+    }
+    // If it's a perfect tie (up to our precision), and it is 'odd', then we must
+    // truncate, instead of rounding up -- which means clearing the carry
+    if(!odd && man_f == ((npf_ftoa_man_t)1 << (NPF_FTOA_MAN_BITS - 1))) {
+      carry = 0;
     }
   }
 
